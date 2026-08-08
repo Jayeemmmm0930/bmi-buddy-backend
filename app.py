@@ -55,11 +55,11 @@ HEALTH_TOPIC_PATTERN = re.compile(
     r"\b(?:"
     r"health|healthy|wellness|wellbeing|bmi|weight|height|diet|nutrition|food|meal|"
     r"calorie|protein|vitamin|mineral|water|hydrat\w*|sleep|bedtime|tired|fatigue|"
-    r"exercise|workout|activity|fitness|sport\w*|walk\w*|run\w*|muscle|bone|body|symptom|"
+    r"exercise\w*|workout\w*|activity|fitness|sport\w*|walk\w*|run\w*|muscle|bone|body|symptom|"
     r"pain|ache|hurt|sick|illness|disease|fever|cough|cold|flu|headache|stomach|"
     r"breath\w*|heart|blood|skin|wound|injury|allerg\w*|infect\w*|doctor|nurse|"
     r"hospital|clinic|medicine|medication|tablet|dose|mental|emotion\w*|mood|"
-    r"stress|anxi\w*|depress\w*|sad|panic|hygiene|wash|tooth|teeth|dental|"
+    r"stress\w*|anxi\w*|depress\w*|sad\w*|panic\w*|feel\w*|hygiene|wash|tooth|teeth|dental|"
     r"puberty|period|menstru\w*|pregnan\w*|sexual|first aid|emergency|growth|"
     r"eat\w*|diabetes|asthma|cancer|dengue|diarrhea|vomit\w*|nausea|"
     r"kalusugan|sakit|lagnat|ubo|sipon|tulog|pagkain|tubig|ehersisyo|gamot|"
@@ -117,6 +117,25 @@ def trusted_facts(text: str) -> str:
             "Do not recommend a medicine or dose. Direct the student to a parent or "
             "guardian and a clinician or pharmacist who can check age, weight, health "
             "conditions, allergies, and other medicines."
+        )
+    if any(phrase in lowered for phrase in ("gain weight", "underweight", "healthy weight")):
+        facts.append(
+            "Healthy weight gain can include regular meals and snacks with affordable "
+            "nutrient-rich foods such as eggs, milk, peanut butter, beans, fish, rice, "
+            "fruit, and vegetables. Unplanned weight loss or growth concerns should be "
+            "discussed with a trusted adult and qualified health professional."
+        )
+    if any(word in lowered for word in ("beginner", "exercise", "exercises", "workout")):
+        facts.append(
+            "A beginner can start gradually with 10-15 minutes of walking, stretching, "
+            "or simple body-weight movements and increase activity over time. Stop for "
+            "pain, dizziness, chest pain, or trouble breathing and tell a trusted adult."
+        )
+    if any(word in lowered for word in ("stress", "stressed", "anxiety", "anxious")):
+        facts.append(
+            "Helpful short stress-management steps include slow breathing, a brief "
+            "movement break, breaking schoolwork into small tasks, and speaking with a "
+            "trusted adult or school counselor when stress feels difficult to manage."
         )
     if not facts:
         return ""
@@ -309,7 +328,9 @@ class LocalHealthModel:
             context = grounding.strip() or "Give safe general health education."
             prompt = (
                 "Answer the health question using the context. Use 1-3 short, "
-                "friendly sentences and do not diagnose or prescribe medicine.\n"
+                "friendly, complete sentences and do not diagnose or prescribe "
+                "medicine. Give at least two practical steps when the student asks "
+                "how or what to do. Do not merely repeat a context fragment.\n"
                 f"Context: {context}\nQuestion: {question}\nAnswer:"
             )
         input_ids = self.tokenizer.encode(
@@ -327,6 +348,7 @@ class LocalHealthModel:
             result = self.model.translate_batch(
                 [input_tokens], beam_size=2,
                 max_decoding_length=32 if is_social else MAX_NEW_TOKENS,
+                min_decoding_length=0 if is_social else 18,
                 repetition_penalty=1.2,
                 no_repeat_ngram_size=2,
                 target_prefix=target_prefix,
