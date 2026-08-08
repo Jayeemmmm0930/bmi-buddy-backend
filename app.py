@@ -301,19 +301,23 @@ class LocalHealthModel:
             item["content"] for item in history if item["role"] == "user"
         )
         grounding = trusted_facts(f"{conversation_text} {question}")
-        turns = [SYSTEM_PROMPT + grounding]
-        for item in history[-4:]:
-            speaker = "Student" if item["role"] == "user" else "Health Buddy"
-            turns.append(f'{speaker}: {item["content"]}')
-        task = (
-            "Reply with a warm, brief greeting, introduce yourself as Health Buddy, "
-            "and ask how you can help. Create the wording yourself."
-            if SOCIAL_PATTERN.fullmatch(" ".join(question.strip().split()))
-            else "Answer the student's final health question directly and helpfully."
+        is_social = bool(
+            SOCIAL_PATTERN.fullmatch(" ".join(question.strip().split()))
         )
-        turns.append(f"Task: {task}")
-        turns.append(f"Student: {question}\nHealth Buddy:")
-        prompt = "\n".join(turns)
+        if is_social:
+            prompt = (
+                "Write one warm, natural greeting to a high-school student. "
+                "Introduce yourself as BMI BUDDY's Health Buddy and ask how you "
+                f"can help with health or wellbeing. Student said: {question}"
+            )
+        else:
+            turns = [SYSTEM_PROMPT + grounding]
+            for item in history[-4:]:
+                speaker = "Student" if item["role"] == "user" else "Health Buddy"
+                turns.append(f'{speaker}: {item["content"]}')
+            turns.append("Answer the final health question directly and helpfully.")
+            turns.append(f"Student: {question}\nHealth Buddy:")
+            prompt = "\n".join(turns)
         input_ids = self.tokenizer.encode(
             prompt, add_special_tokens=True, truncation=True, max_length=512
         )
@@ -321,8 +325,9 @@ class LocalHealthModel:
         with self._generation_lock:
             result = self.model.translate_batch(
                 [input_tokens], beam_size=1,
-                max_decoding_length=MAX_NEW_TOKENS,
-                repetition_penalty=1.05,
+                max_decoding_length=32 if is_social else MAX_NEW_TOKENS,
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=2,
             )[0]
         reply_ids = self.tokenizer.convert_tokens_to_ids(result.hypotheses[0])
         reply = self.tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
