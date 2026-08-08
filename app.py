@@ -17,7 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
-MODEL_NAME = os.getenv("LOCAL_AI_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+ON_RENDER = os.getenv("RENDER", "").lower() == "true"
+MODEL_NAME = (
+    os.getenv("RENDER_AI_MODEL", "HuggingFaceTB/SmolLM2-135M-Instruct")
+    if ON_RENDER
+    else os.getenv("LOCAL_AI_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+)
 MAX_TURNS = 4
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "72"))
 
@@ -277,10 +282,19 @@ class LocalHealthModel:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_NAME, local_files_only=local_only
                 )
-                # float32 is faster than emulated bfloat16 on many consumer CPUs.
-                dtype = torch.float16 if self.device == "cuda" else torch.float32
+                # Render's smallest service cannot hold Qwen 0.5B in float32.
+                # SmolLM2 plus half precision keeps responses generative while
+                # substantially reducing the hosted process's memory footprint.
+                dtype = (
+                    torch.float16
+                    if self.device == "cuda" or ON_RENDER
+                    else torch.float32
+                )
                 model = AutoModelForCausalLM.from_pretrained(
-                    MODEL_NAME, dtype=dtype, local_files_only=local_only
+                    MODEL_NAME,
+                    dtype=dtype,
+                    local_files_only=local_only,
+                    low_cpu_mem_usage=ON_RENDER,
                 )
                 model.to(self.device)
                 model.eval()
@@ -361,11 +375,14 @@ def conversation_key(payload: ChatRequest, request: Request) -> str:
 
 @app.get("/health")
 def health() -> dict[str, str | bool]:
-    return {
+    result: dict[str, str | bool] = {
         "status": "ok", "service": "school-health-buddy", "ai": "local",
         "model": MODEL_NAME, "model_loaded": health_model.model is not None,
         "model_loading": health_model.loading,
     }
+    if health_model.load_error:
+        result["model_error"] = health_model.load_error
+    return result
 
 
 @app.get("/")

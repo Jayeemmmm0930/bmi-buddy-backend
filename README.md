@@ -27,6 +27,9 @@ py app.py
 
 Set `HF_LOCAL_FILES_ONLY=1` only when the selected model is already downloaded.
 Leave it unset on Render so the service can download the model on first startup.
+Render automatically uses `HuggingFaceTB/SmolLM2-135M-Instruct` in half
+precision to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
+only when the selected instance has enough memory for a larger model.
 
 - Local documentation: `http://127.0.0.1:8000/docs`
 - Flutter chat endpoint: `POST /api/chat`
