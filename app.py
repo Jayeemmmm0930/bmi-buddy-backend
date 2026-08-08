@@ -273,13 +273,14 @@ class LocalHealthModel:
                 self.torch = torch
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 print(f"Loading local AI model: {MODEL_NAME}", flush=True)
+                local_only = os.getenv("HF_LOCAL_FILES_ONLY", "0") == "1"
                 self.tokenizer = AutoTokenizer.from_pretrained(
-                    MODEL_NAME, local_files_only=False
+                    MODEL_NAME, local_files_only=local_only
                 )
                 # float32 is faster than emulated bfloat16 on many consumer CPUs.
                 dtype = torch.float16 if self.device == "cuda" else torch.float32
                 model = AutoModelForCausalLM.from_pretrained(
-                    MODEL_NAME, dtype=dtype, local_files_only=False
+                    MODEL_NAME, dtype=dtype, local_files_only=local_only
                 )
                 model.to(self.device)
                 model.eval()
@@ -440,7 +441,7 @@ def local_ip_address() -> str:
 if __name__ == "__main__":
     import uvicorn
     host = os.getenv("BACKEND_HOST", "0.0.0.0")
-    port = int(os.getenv("BACKEND_PORT", "8000"))
+    port = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8000")))
     lan_ip = local_ip_address()
     print("\nSchool Health Buddy local AI", flush=True)
     print(f"Local:   http://127.0.0.1:{port}", flush=True)

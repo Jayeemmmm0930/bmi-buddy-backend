@@ -11,10 +11,9 @@ py -m pip install -r requirements.txt
 py app.py
 ```
 
-The optimized 0.5B model is already downloaded on this computer. The API starts
-immediately and warms the model in the background. Common questions about sleep,
-activity, BMI, hydration, and medicine use verified instant answers; other health
-questions use the local model. Keep the terminal open while using the Flutter app.
+The optimized 0.5B model downloads automatically when it is not already cached.
+The API starts immediately and warms the model in the background. Keep the
+terminal or hosted service running while using the Flutter app.
 Non-health prompts are rejected by a server-side topic filter before they can reach
 the model. Short follow-ups such as `why?` remain available during a health chat.
 
@@ -25,6 +24,9 @@ $env:LOCAL_AI_MODEL="Qwen/Qwen2.5-1.5B-Instruct" # slower, larger model
 $env:MAX_NEW_TOKENS="72"
 py app.py
 ```
+
+Set `HF_LOCAL_FILES_ONLY=1` only when the selected model is already downloaded.
+Leave it unset on Render so the service can download the model on first startup.
 
 - Local documentation: `http://127.0.0.1:8000/docs`
 - Flutter chat endpoint: `POST /api/chat`
