@@ -316,12 +316,20 @@ class LocalHealthModel:
             prompt, add_special_tokens=True, truncation=True, max_length=512
         )
         input_tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
+        target_prefix = None
+        if is_social:
+            prefix_ids = self.tokenizer.encode(
+                "Hello! I'm Health Buddy. How can I help",
+                add_special_tokens=False,
+            )
+            target_prefix = [self.tokenizer.convert_ids_to_tokens(prefix_ids)]
         with self._generation_lock:
             result = self.model.translate_batch(
                 [input_tokens], beam_size=2,
                 max_decoding_length=32 if is_social else MAX_NEW_TOKENS,
                 repetition_penalty=1.2,
                 no_repeat_ngram_size=2,
+                target_prefix=target_prefix,
             )[0]
         reply_ids = self.tokenizer.convert_tokens_to_ids(result.hypotheses[0])
         reply = self.tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
