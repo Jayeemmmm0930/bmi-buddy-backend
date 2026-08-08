@@ -120,11 +120,7 @@ def trusted_facts(text: str) -> str:
         )
     if not facts:
         return ""
-    return (
-        "\n\nIMPORTANT VERIFIED FACTS FOR THIS QUESTION:\n- "
-        + "\n- ".join(facts)
-        + "\nUse these exact facts and do not contradict or replace their numbers."
-    )
+    return "\nHelpful verified facts:\n- " + "\n- ".join(facts)
 
 
 def quick_answer(question: str) -> str | None:
@@ -306,17 +302,22 @@ class LocalHealthModel:
         )
         if is_social:
             prompt = (
-                "Write one warm, natural greeting to a high-school student. "
-                "Introduce yourself as BMI BUDDY's Health Buddy and ask how you "
-                f"can help with health or wellbeing. Student said: {question}"
+                "Reply warmly to this student's greeting in one short sentence. "
+                "You are BMI BUDDY's Health Buddy. End by asking how you can help "
+                f"with health or wellbeing. Greeting: {question}\nReply:"
             )
         else:
-            turns = [SYSTEM_PROMPT + grounding]
-            for item in history[-4:]:
+            turns = [
+                "Give safe, general health education for a teenager in 1-3 short "
+                "sentences. Answer the question directly. Do not diagnose or "
+                "prescribe medicine. Never suggest extreme dieting or exercise. "
+                "Recommend a trusted adult, school nurse, or clinician when needed."
+                + grounding
+            ]
+            for item in history[-2:]:
                 speaker = "Student" if item["role"] == "user" else "Health Buddy"
                 turns.append(f'{speaker}: {item["content"]}')
-            turns.append("Answer the final health question directly and helpfully.")
-            turns.append(f"Student: {question}\nHealth Buddy:")
+            turns.append(f"Health question: {question}\nHelpful answer:")
             prompt = "\n".join(turns)
         input_ids = self.tokenizer.encode(
             prompt, add_special_tokens=True, truncation=True, max_length=512
