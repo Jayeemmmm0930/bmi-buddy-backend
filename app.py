@@ -19,9 +19,8 @@ from pydantic import BaseModel, Field
 
 ON_RENDER = os.getenv("RENDER", "").lower() == "true"
 MODEL_NAME = (
-    os.getenv("RENDER_AI_MODEL", "Xenova/flan-t5-small")
-    if ON_RENDER
-    else os.getenv("LOCAL_AI_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+    os.getenv("RENDER_AI_MODEL", "jncraton/flan-t5-small-ct2-int8")
+    if ON_RENDER else os.getenv("LOCAL_AI_MODEL", "jncraton/flan-t5-small-ct2-int8")
 )
 MAX_TURNS = 4
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "72"))
@@ -254,11 +253,9 @@ class LocalHealthModel:
     def __init__(self) -> None:
         self.tokenizer = None
         self.model = None
-        self.torch = None
         self.device = "loading"
         self.loading = False
         self.load_error: str | None = None
-        self.is_seq2seq = ON_RENDER or "t5" in MODEL_NAME.lower()
         self._load_lock = threading.Lock()
         self._generation_lock = threading.Lock()
 
@@ -271,44 +268,31 @@ class LocalHealthModel:
             self.loading = True
             self.load_error = None
             try:
-                # Importing the ML stack is expensive. Keeping it here lets Uvicorn
-                # begin serving health checks and quick answers immediately.
-                import torch
-                from transformers import AutoModelForCausalLM, AutoTokenizer
+                # CTranslate2 performs int8 generation without importing PyTorch.
+                # That is essential on Render's 512 MB free service.
+                import ctranslate2
+                from huggingface_hub import snapshot_download
+                from transformers import AutoTokenizer
 
-                self.torch = torch
-                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                self.device = "cpu"
                 print(f"Loading local AI model: {MODEL_NAME}", flush=True)
                 local_only = os.getenv("HF_LOCAL_FILES_ONLY", "0") == "1"
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_NAME, local_files_only=local_only
                 )
-                if ON_RENDER:
-                    # Use pre-quantized ONNX weights on Render. Loading the original
-                    # PyTorch weights causes a memory spike above the free plan's
-                    # 512 MB limit, even when the final tensors use reduced precision.
-                    from optimum.onnxruntime import ORTModelForSeq2SeqLM
-
-                    model = ORTModelForSeq2SeqLM.from_pretrained(
-                        MODEL_NAME,
-                        subfolder="onnx",
-                        encoder_file_name="encoder_model_quantized.onnx",
-                        decoder_file_name="decoder_model_merged_quantized.onnx",
-                        use_merged=True,
-                        use_cache=False,
-                        provider="CPUExecutionProvider",
-                        local_files_only=local_only,
-                    )
-                    self.device = "cpu"
-                else:
-                    model = AutoModelForCausalLM.from_pretrained(
-                        MODEL_NAME,
-                        dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                        local_files_only=local_only,
-                    )
-                    model.to(self.device)
-                    model.eval()
-                self.model = model
+                model_dir = snapshot_download(
+                    MODEL_NAME,
+                    local_files_only=local_only,
+                    allow_patterns=[
+                        "config.json", "model.bin", "shared_vocabulary.*",
+                        "special_tokens_map.json", "spiece.model", "tokenizer.json",
+                        "tokenizer_config.json",
+                    ],
+                )
+                self.model = ctranslate2.Translator(
+                    model_dir, device="cpu", compute_type="int8",
+                    inter_threads=1, intra_threads=1,
+                )
                 print(f"Local AI ready on {self.device}", flush=True)
             except Exception as error:
                 self.load_error = str(error)
@@ -328,42 +312,24 @@ class LocalHealthModel:
             item["content"] for item in history if item["role"] == "user"
         )
         grounding = trusted_facts(f"{conversation_text} {question}")
-        with self._generation_lock, self.torch.inference_mode():
-            if self.is_seq2seq:
-                turns = [SYSTEM_PROMPT + grounding]
-                for item in history:
-                    speaker = "Student" if item["role"] == "user" else "Health Buddy"
-                    turns.append(f'{speaker}: {item["content"]}')
-                turns.append(f"Student: {question}\nHealth Buddy:")
-                prompt = "\n".join(turns)
-                inputs = self.tokenizer(
-                    prompt, return_tensors="pt", truncation=True, max_length=512
-                ).to(self.device)
-            else:
-                messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT + grounding},
-                    *history,
-                    {"role": "user", "content": question},
-                ]
-                prompt = self.tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-                inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-            output = self.model.generate(
-                **inputs,
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=False,
+        turns = [SYSTEM_PROMPT + grounding]
+        for item in history:
+            speaker = "Student" if item["role"] == "user" else "Health Buddy"
+            turns.append(f'{speaker}: {item["content"]}')
+        turns.append(f"Student: {question}\nHealth Buddy:")
+        prompt = "\n".join(turns)
+        input_ids = self.tokenizer.encode(
+            prompt, add_special_tokens=True, truncation=True, max_length=512
+        )
+        input_tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
+        with self._generation_lock:
+            result = self.model.translate_batch(
+                [input_tokens], beam_size=1,
+                max_decoding_length=MAX_NEW_TOKENS,
                 repetition_penalty=1.05,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-            reply_tokens = (
-                output[0]
-                if self.is_seq2seq
-                else output[0, inputs["input_ids"].shape[1]:]
-            )
-            reply = self.tokenizer.decode(
-                reply_tokens, skip_special_tokens=True
-            ).strip()
+            )[0]
+        reply_ids = self.tokenizer.convert_tokens_to_ids(result.hypotheses[0])
+        reply = self.tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
         if not reply:
             raise RuntimeError("The local model returned an empty response.")
         # A small local model can occasionally copy an adult/child sleep range to the

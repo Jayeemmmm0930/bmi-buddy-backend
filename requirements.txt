@@ -1,7 +1,5 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 transformers>=4.46,<6
-torch>=2.2
-accelerate>=0.26,<2
 sentencepiece>=0.2,<1
-optimum-onnx[onnxruntime]==0.1.0
+ctranslate2>=4.6,<5

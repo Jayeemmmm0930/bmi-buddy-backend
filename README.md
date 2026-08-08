@@ -11,7 +11,7 @@ py -m pip install -r requirements.txt
 py app.py
 ```
 
-The optimized 0.5B model downloads automatically when it is not already cached.
+The optimized int8 model downloads automatically when it is not already cached.
 The API starts immediately and warms the model in the background. Keep the
 terminal or hosted service running while using the Flutter app.
 Non-health prompts are rejected by a server-side topic filter before they can reach
@@ -27,8 +27,8 @@ py app.py
 
 Set `HF_LOCAL_FILES_ONLY=1` only when the selected model is already downloaded.
 Leave it unset on Render so the service can download the model on first startup.
-Render automatically uses the compact `Xenova/flan-t5-small` instruction model
-with quantized ONNX weights to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
+Render automatically uses the compact `jncraton/flan-t5-small-ct2-int8`
+instruction model with CTranslate2 to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
 only when the selected instance has enough memory for a larger model.
 
 - Local documentation: `http://127.0.0.1:8000/docs`
