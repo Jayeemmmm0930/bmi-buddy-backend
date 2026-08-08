@@ -396,6 +396,19 @@ class LocalHealthModel:
             )
             if candidate and re.search(r"[.!?]$", candidate):
                 reply = candidate[0].upper() + candidate[1:]
+            else:
+                # Never show a visibly cut-off model reply. This uses the verified
+                # grounding for the current question only after both generation
+                # attempts fail the completeness check.
+                fact_lines = [
+                    line[2:].strip()
+                    for line in grounding.splitlines()
+                    if line.startswith("- ") and line[2:].strip()
+                ]
+                if fact_lines:
+                    reply = fact_lines[-1]
+                else:
+                    reply = reply.rstrip(" ,;:-") + "."
         lowered_question = question.lower()
         normalized_reply = reply.replace("–", "-").replace("—", "-")
         if (
