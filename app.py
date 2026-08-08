@@ -19,8 +19,8 @@ from pydantic import BaseModel, Field
 
 ON_RENDER = os.getenv("RENDER", "").lower() == "true"
 MODEL_NAME = (
-    os.getenv("RENDER_AI_MODEL", "jncraton/flan-t5-small-ct2-int8")
-    if ON_RENDER else os.getenv("LOCAL_AI_MODEL", "jncraton/flan-t5-small-ct2-int8")
+    os.getenv("RENDER_AI_MODEL", "jncraton/flan-t5-base-ct2-int8")
+    if ON_RENDER else os.getenv("LOCAL_AI_MODEL", "jncraton/flan-t5-base-ct2-int8")
 )
 MAX_TURNS = 4
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "72"))

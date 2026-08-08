@@ -27,7 +27,7 @@ py app.py
 
 Set `HF_LOCAL_FILES_ONLY=1` only when the selected model is already downloaded.
 Leave it unset on Render so the service can download the model on first startup.
-Render automatically uses the compact `jncraton/flan-t5-small-ct2-int8`
+Render automatically uses the quantized `jncraton/flan-t5-base-ct2-int8`
 instruction model with CTranslate2 to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
 only when the selected instance has enough memory for a larger model.
 
