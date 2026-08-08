@@ -25,27 +25,13 @@ MODEL_NAME = (
 MAX_TURNS = 4
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "72"))
 
-SYSTEM_PROMPT = """You are Health Buddy, a careful school health education assistant.
-Answer the student's actual question directly in plain, friendly language. Use the
-conversation for follow-up questions. Do not give a generic menu of topics when you
-can answer the question. Keep answers concise, normally 2-3 sentences.
-
-When the student greets you, greet them warmly, briefly introduce yourself as BMI
-BUDDY's Health Buddy, and ask how you can help with their health or wellbeing.
-
-Safety and accuracy rules:
-- Give general education, not a diagnosis. Do not invent facts or claim certainty.
-- Never prescribe medicines or doses. For symptoms, suggest a trusted adult, school
-  nurse, pharmacist, or clinician when appropriate.
-- Never recommend crash diets, fasting, purging, diet pills, or extreme exercise.
-- BMI is a screening measure, not a diagnosis. For ages 2-19 it must be interpreted
-  using age- and sex-specific BMI-for-age percentiles, not adult BMI cutoffs.
-- Ages 6-12 generally need 9-12 hours of sleep; ages 13-18 need 8-10 hours.
-- Ages 5-17 should aim for about 60 minutes of moderate-to-vigorous activity daily,
-  building up gradually if currently inactive.
-- If important details are missing, ask one short follow-up question.
-- If asked about something outside health and wellbeing, politely say this assistant
-  focuses on health.
+SYSTEM_PROMPT = """You are BMI BUDDY's friendly Health Buddy for high-school students.
+Answer the final Student message directly in plain language and normally use 1-3
+short sentences. Give educational information, never a diagnosis or invented facts.
+Do not prescribe medicines or doses, and never suggest extreme dieting or exercise.
+For symptoms or personal medical concerns, recommend a trusted adult, school nurse,
+pharmacist, or clinician when appropriate. Youth BMI uses age- and sex-specific
+percentiles and is only a screening measure. Stay focused on health and wellbeing.
 """
 
 URGENT_TERMS = (
@@ -280,6 +266,9 @@ class LocalHealthModel:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_NAME, local_files_only=local_only
                 )
+                # If a long conversation must be shortened, retain the newest turns
+                # and the student's current question instead of the prompt opening.
+                self.tokenizer.truncation_side = "left"
                 model_dir = snapshot_download(
                     MODEL_NAME,
                     local_files_only=local_only,
@@ -313,9 +302,16 @@ class LocalHealthModel:
         )
         grounding = trusted_facts(f"{conversation_text} {question}")
         turns = [SYSTEM_PROMPT + grounding]
-        for item in history:
+        for item in history[-4:]:
             speaker = "Student" if item["role"] == "user" else "Health Buddy"
             turns.append(f'{speaker}: {item["content"]}')
+        task = (
+            "Reply with a warm, brief greeting, introduce yourself as Health Buddy, "
+            "and ask how you can help. Create the wording yourself."
+            if SOCIAL_PATTERN.fullmatch(" ".join(question.strip().split()))
+            else "Answer the student's final health question directly and helpfully."
+        )
+        turns.append(f"Task: {task}")
         turns.append(f"Student: {question}\nHealth Buddy:")
         prompt = "\n".join(turns)
         input_ids = self.tokenizer.encode(
