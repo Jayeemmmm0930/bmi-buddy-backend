@@ -23,7 +23,7 @@ MODEL_NAME = (
     if ON_RENDER else os.getenv("LOCAL_AI_MODEL", "jncraton/flan-t5-base-ct2-int8")
 )
 MAX_TURNS = 4
-MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "72"))
+MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "96"))
 
 SYSTEM_PROMPT = """You are BMI BUDDY's friendly Health Buddy for high-school students.
 Answer the final Student message directly in plain language and normally use 1-3
@@ -357,6 +357,45 @@ class LocalHealthModel:
         reply = self.tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
         if not reply:
             raise RuntimeError("The local model returned an empty response.")
+        # Clean up common tiny-model presentation errors without replacing the
+        # generated answer. If it stops mid-sentence, let the model rewrite its
+        # own draft once before returning it to the student.
+        reply = re.sub(r"\bBIM(?=-for|\b)", "BMI", reply, flags=re.IGNORECASE)
+        reply = reply[0].upper() + reply[1:]
+        incomplete = (
+            not re.search(r"[.!?]$", reply)
+            or bool(re.search(r"\s+[A-Za-z]$", reply))
+        )
+        if not is_social and incomplete:
+            rewrite_prompt = (
+                "Rewrite the draft as two complete, friendly sentences that directly "
+                "answer the health question. Keep its health facts, fix spelling, and "
+                "finish every word.\n"
+                f"Question: {question}\nDraft: {reply}\nImproved answer:"
+            )
+            rewrite_ids = self.tokenizer.encode(
+                rewrite_prompt, add_special_tokens=True,
+                truncation=True, max_length=384,
+            )
+            rewrite_tokens = self.tokenizer.convert_ids_to_tokens(rewrite_ids)
+            with self._generation_lock:
+                rewritten = self.model.translate_batch(
+                    [rewrite_tokens], beam_size=2,
+                    max_decoding_length=MAX_NEW_TOKENS,
+                    min_decoding_length=18, repetition_penalty=1.2,
+                    no_repeat_ngram_size=2,
+                )[0]
+            rewritten_ids = self.tokenizer.convert_tokens_to_ids(
+                rewritten.hypotheses[0]
+            )
+            candidate = self.tokenizer.decode(
+                rewritten_ids, skip_special_tokens=True
+            ).strip()
+            candidate = re.sub(
+                r"\bBIM(?=-for|\b)", "BMI", candidate, flags=re.IGNORECASE
+            )
+            if candidate and re.search(r"[.!?]$", candidate):
+                reply = candidate[0].upper() + candidate[1:]
         lowered_question = question.lower()
         normalized_reply = reply.replace("–", "-").replace("—", "-")
         if (
