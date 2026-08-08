@@ -302,9 +302,10 @@ class LocalHealthModel:
         )
         if is_social:
             prompt = (
-                "Reply warmly to this student's greeting in one short sentence. "
-                "You are BMI BUDDY's Health Buddy. End by asking how you can help "
-                f"with health or wellbeing. Greeting: {question}\nReply:"
+                f'A student says "{question}" to Health Buddy. Write Health Buddy\'s '
+                "direct reply in one sentence. Greet the student, say that you are "
+                "Health Buddy, and ask how you can help with health or wellbeing. "
+                "Do not describe the student. Reply only:"
             )
         else:
             turns = [
@@ -312,6 +313,7 @@ class LocalHealthModel:
                 "sentences. Answer the question directly. Do not diagnose or "
                 "prescribe medicine. Never suggest extreme dieting or exercise. "
                 "Recommend a trusted adult, school nurse, or clinician when needed."
+                " Use the helpful verified facts and preserve their exact numbers."
                 + grounding
             ]
             for item in history[-2:]:
@@ -334,6 +336,37 @@ class LocalHealthModel:
         reply = self.tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
         if not reply:
             raise RuntimeError("The local model returned an empty response.")
+        lowered_question = question.lower()
+        normalized_reply = reply.replace("–", "-").replace("—", "-")
+        if (
+            "teen" in lowered_question
+            and any(word in lowered_question for word in ("sleep", "hours"))
+            and "8-10" not in normalized_reply
+        ):
+            correction = (
+                f"Correct this answer in two friendly sentences: {question} "
+                "Use the verified range of 8-10 hours and no other number."
+            )
+            correction_ids = self.tokenizer.encode(
+                correction, add_special_tokens=True,
+                truncation=True, max_length=256,
+            )
+            correction_tokens = self.tokenizer.convert_ids_to_tokens(correction_ids)
+            with self._generation_lock:
+                corrected = self.model.translate_batch(
+                    [correction_tokens], beam_size=1,
+                    max_decoding_length=48, repetition_penalty=1.2,
+                    no_repeat_ngram_size=2,
+                )[0]
+            corrected_ids = self.tokenizer.convert_tokens_to_ids(
+                corrected.hypotheses[0]
+            )
+            reply = self.tokenizer.decode(
+                corrected_ids, skip_special_tokens=True
+            ).strip()
+            normalized_reply = reply.replace("–", "-").replace("—", "-")
+            if "8-10" not in normalized_reply:
+                raise RuntimeError("The AI contradicted the verified sleep range.")
         # A small local model can occasionally copy an adult/child sleep range to the
         # wrong age. Reject that contradiction instead of showing unsafe information.
         age_match = re.search(r"\b(?:age[sd]?\s*)?(\d{1,2})(?:-year-old|\s*years?\s*old)?\b", question.lower())
