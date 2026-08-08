@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 ON_RENDER = os.getenv("RENDER", "").lower() == "true"
 MODEL_NAME = (
-    os.getenv("RENDER_AI_MODEL", "google/flan-t5-small")
+    os.getenv("RENDER_AI_MODEL", "Xenova/flan-t5-small")
     if ON_RENDER
     else os.getenv("LOCAL_AI_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 )
@@ -274,11 +274,7 @@ class LocalHealthModel:
                 # Importing the ML stack is expensive. Keeping it here lets Uvicorn
                 # begin serving health checks and quick answers immediately.
                 import torch
-                from transformers import (
-                    AutoModelForCausalLM,
-                    AutoModelForSeq2SeqLM,
-                    AutoTokenizer,
-                )
+                from transformers import AutoModelForCausalLM, AutoTokenizer
 
                 self.torch = torch
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -287,26 +283,31 @@ class LocalHealthModel:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_NAME, local_files_only=local_only
                 )
-                # Render's free service has 512 MB of RAM. FLAN-T5 Small is kept
-                # in bfloat16 there so the model remains generative and fits beside
-                # Python, FastAPI, PyTorch, and tokenizer memory.
-                dtype = (
-                    torch.float16 if self.device == "cuda"
-                    else torch.bfloat16 if ON_RENDER
-                    else torch.float32
-                )
-                model_class = (
-                    AutoModelForSeq2SeqLM if self.is_seq2seq
-                    else AutoModelForCausalLM
-                )
-                model = model_class.from_pretrained(
-                    MODEL_NAME,
-                    dtype=dtype,
-                    local_files_only=local_only,
-                    low_cpu_mem_usage=ON_RENDER,
-                )
-                model.to(self.device)
-                model.eval()
+                if ON_RENDER:
+                    # Use pre-quantized ONNX weights on Render. Loading the original
+                    # PyTorch weights causes a memory spike above the free plan's
+                    # 512 MB limit, even when the final tensors use reduced precision.
+                    from optimum.onnxruntime import ORTModelForSeq2SeqLM
+
+                    model = ORTModelForSeq2SeqLM.from_pretrained(
+                        MODEL_NAME,
+                        subfolder="onnx",
+                        encoder_file_name="encoder_model_quantized.onnx",
+                        decoder_file_name="decoder_model_merged_quantized.onnx",
+                        use_merged=True,
+                        use_cache=False,
+                        provider="CPUExecutionProvider",
+                        local_files_only=local_only,
+                    )
+                    self.device = "cpu"
+                else:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        MODEL_NAME,
+                        dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                        local_files_only=local_only,
+                    )
+                    model.to(self.device)
+                    model.eval()
                 self.model = model
                 print(f"Local AI ready on {self.device}", flush=True)
             except Exception as error:

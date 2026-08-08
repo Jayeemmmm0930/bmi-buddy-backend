@@ -27,8 +27,8 @@ py app.py
 
 Set `HF_LOCAL_FILES_ONLY=1` only when the selected model is already downloaded.
 Leave it unset on Render so the service can download the model on first startup.
-Render automatically uses the compact `google/flan-t5-small` instruction model
-in reduced precision to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
+Render automatically uses the compact `Xenova/flan-t5-small` instruction model
+with quantized ONNX weights to fit smaller hosted instances. Override it with `RENDER_AI_MODEL`
 only when the selected instance has enough memory for a larger model.
 
 - Local documentation: `http://127.0.0.1:8000/docs`

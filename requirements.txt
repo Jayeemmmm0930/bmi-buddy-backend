@@ -4,3 +4,4 @@ transformers>=4.46,<6
 torch>=2.2
 accelerate>=0.26,<2
 sentencepiece>=0.2,<1
+optimum-onnx[onnxruntime]==0.1.0
