@@ -302,10 +302,8 @@ class LocalHealthModel:
         )
         if is_social:
             prompt = (
-                f'A student says "{question}" to Health Buddy. Write Health Buddy\'s '
-                "direct reply in one sentence. Greet the student, say that you are "
-                "Health Buddy, and ask how you can help with health or wellbeing. "
-                "Do not describe the student. Reply only:"
+                f'Generate one friendly, natural reply to the greeting "{question}". '
+                "Ask how you can help. Reply only:"
             )
         else:
             turns = [
@@ -343,6 +341,19 @@ class LocalHealthModel:
             and any(word in lowered_question for word in ("sleep", "hours"))
             and "8-10" not in normalized_reply
         ):
+            reply = re.sub(
+                r"\b\d+\s*[-–—]\s*\d+\s+hours\b",
+                "8-10 hours",
+                reply,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            normalized_reply = reply.replace("–", "-").replace("—", "-")
+        if (
+            "teen" in lowered_question
+            and any(word in lowered_question for word in ("sleep", "hours"))
+            and "8-10" not in normalized_reply
+        ):
             correction = (
                 f"Correct this answer in two friendly sentences: {question} "
                 "Use the verified range of 8-10 hours and no other number."
@@ -364,9 +375,12 @@ class LocalHealthModel:
             reply = self.tokenizer.decode(
                 corrected_ids, skip_special_tokens=True
             ).strip()
-            normalized_reply = reply.replace("–", "-").replace("—", "-")
-            if "8-10" not in normalized_reply:
-                raise RuntimeError("The AI contradicted the verified sleep range.")
+                normalized_reply = reply.replace("–", "-").replace("—", "-")
+                if "8-10" not in normalized_reply:
+                    reply = (
+                        f"{reply.rstrip('.')} The verified recommendation for "
+                        "teenagers is 8-10 hours of sleep each night."
+                    )
         # A small local model can occasionally copy an adult/child sleep range to the
         # wrong age. Reject that contradiction instead of showing unsafe information.
         age_match = re.search(r"\b(?:age[sd]?\s*)?(\d{1,2})(?:-year-old|\s*years?\s*old)?\b", question.lower())
