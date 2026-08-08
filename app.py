@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 ON_RENDER = os.getenv("RENDER", "").lower() == "true"
 MODEL_NAME = (
-    os.getenv("RENDER_AI_MODEL", "HuggingFaceTB/SmolLM2-135M-Instruct")
+    os.getenv("RENDER_AI_MODEL", "google/flan-t5-small")
     if ON_RENDER
     else os.getenv("LOCAL_AI_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 )
@@ -258,6 +258,7 @@ class LocalHealthModel:
         self.device = "loading"
         self.loading = False
         self.load_error: str | None = None
+        self.is_seq2seq = ON_RENDER or "t5" in MODEL_NAME.lower()
         self._load_lock = threading.Lock()
         self._generation_lock = threading.Lock()
 
@@ -273,7 +274,11 @@ class LocalHealthModel:
                 # Importing the ML stack is expensive. Keeping it here lets Uvicorn
                 # begin serving health checks and quick answers immediately.
                 import torch
-                from transformers import AutoModelForCausalLM, AutoTokenizer
+                from transformers import (
+                    AutoModelForCausalLM,
+                    AutoModelForSeq2SeqLM,
+                    AutoTokenizer,
+                )
 
                 self.torch = torch
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -282,15 +287,19 @@ class LocalHealthModel:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_NAME, local_files_only=local_only
                 )
-                # Render's smallest service cannot hold Qwen 0.5B in float32.
-                # SmolLM2 plus half precision keeps responses generative while
-                # substantially reducing the hosted process's memory footprint.
+                # Render's free service has 512 MB of RAM. FLAN-T5 Small is kept
+                # in bfloat16 there so the model remains generative and fits beside
+                # Python, FastAPI, PyTorch, and tokenizer memory.
                 dtype = (
-                    torch.float16
-                    if self.device == "cuda" or ON_RENDER
+                    torch.float16 if self.device == "cuda"
+                    else torch.bfloat16 if ON_RENDER
                     else torch.float32
                 )
-                model = AutoModelForCausalLM.from_pretrained(
+                model_class = (
+                    AutoModelForSeq2SeqLM if self.is_seq2seq
+                    else AutoModelForCausalLM
+                )
+                model = model_class.from_pretrained(
                     MODEL_NAME,
                     dtype=dtype,
                     local_files_only=local_only,
@@ -318,16 +327,27 @@ class LocalHealthModel:
             item["content"] for item in history if item["role"] == "user"
         )
         grounding = trusted_facts(f"{conversation_text} {question}")
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + grounding},
-            *history,
-        ]
-        messages.append({"role": "user", "content": question})
         with self._generation_lock, self.torch.inference_mode():
-            prompt = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            if self.is_seq2seq:
+                turns = [SYSTEM_PROMPT + grounding]
+                for item in history:
+                    speaker = "Student" if item["role"] == "user" else "Health Buddy"
+                    turns.append(f'{speaker}: {item["content"]}')
+                turns.append(f"Student: {question}\nHealth Buddy:")
+                prompt = "\n".join(turns)
+                inputs = self.tokenizer(
+                    prompt, return_tensors="pt", truncation=True, max_length=512
+                ).to(self.device)
+            else:
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT + grounding},
+                    *history,
+                    {"role": "user", "content": question},
+                ]
+                prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+                inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             output = self.model.generate(
                 **inputs,
                 max_new_tokens=MAX_NEW_TOKENS,
@@ -335,8 +355,14 @@ class LocalHealthModel:
                 repetition_penalty=1.05,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-            new_tokens = output[0, inputs["input_ids"].shape[1]:]
-            reply = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+            reply_tokens = (
+                output[0]
+                if self.is_seq2seq
+                else output[0, inputs["input_ids"].shape[1]:]
+            )
+            reply = self.tokenizer.decode(
+                reply_tokens, skip_special_tokens=True
+            ).strip()
         if not reply:
             raise RuntimeError("The local model returned an empty response.")
         # A small local model can occasionally copy an adult/child sleep range to the
