@@ -302,30 +302,23 @@ class LocalHealthModel:
         )
         if is_social:
             prompt = (
-                f'Generate one friendly, natural reply to the greeting "{question}". '
-                "Ask how you can help. Reply only:"
+                "Write a friendly one-sentence reply from a health assistant to a "
+                f'student who says "{question}". Reply:'
             )
         else:
-            turns = [
-                "Give safe, general health education for a teenager in 1-3 short "
-                "sentences. Answer the question directly. Do not diagnose or "
-                "prescribe medicine. Never suggest extreme dieting or exercise. "
-                "Recommend a trusted adult, school nurse, or clinician when needed."
-                " Use the helpful verified facts and preserve their exact numbers."
-                + grounding
-            ]
-            for item in history[-2:]:
-                speaker = "Student" if item["role"] == "user" else "Health Buddy"
-                turns.append(f'{speaker}: {item["content"]}')
-            turns.append(f"Health question: {question}\nHelpful answer:")
-            prompt = "\n".join(turns)
+            context = grounding.strip() or "Give safe general health education."
+            prompt = (
+                "Answer the health question using the context. Use 1-3 short, "
+                "friendly sentences and do not diagnose or prescribe medicine.\n"
+                f"Context: {context}\nQuestion: {question}\nAnswer:"
+            )
         input_ids = self.tokenizer.encode(
             prompt, add_special_tokens=True, truncation=True, max_length=512
         )
         input_tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
         with self._generation_lock:
             result = self.model.translate_batch(
-                [input_tokens], beam_size=1,
+                [input_tokens], beam_size=2,
                 max_decoding_length=32 if is_social else MAX_NEW_TOKENS,
                 repetition_penalty=1.2,
                 no_repeat_ngram_size=2,
