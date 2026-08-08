@@ -274,12 +274,12 @@ class LocalHealthModel:
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 print(f"Loading local AI model: {MODEL_NAME}", flush=True)
                 self.tokenizer = AutoTokenizer.from_pretrained(
-                    MODEL_NAME, local_files_only=True
+                    MODEL_NAME, local_files_only=False
                 )
                 # float32 is faster than emulated bfloat16 on many consumer CPUs.
                 dtype = torch.float16 if self.device == "cuda" else torch.float32
                 model = AutoModelForCausalLM.from_pretrained(
-                    MODEL_NAME, dtype=dtype, local_files_only=True
+                    MODEL_NAME, dtype=dtype, local_files_only=False
                 )
                 model.to(self.device)
                 model.eval()
