@@ -375,12 +375,12 @@ class LocalHealthModel:
             reply = self.tokenizer.decode(
                 corrected_ids, skip_special_tokens=True
             ).strip()
-                normalized_reply = reply.replace("–", "-").replace("—", "-")
-                if "8-10" not in normalized_reply:
-                    reply = (
-                        f"{reply.rstrip('.')} The verified recommendation for "
-                        "teenagers is 8-10 hours of sleep each night."
-                    )
+            normalized_reply = reply.replace("–", "-").replace("—", "-")
+            if "8-10" not in normalized_reply:
+                reply = (
+                    f"{reply.rstrip('.')} The verified recommendation for "
+                    "teenagers is 8-10 hours of sleep each night."
+                )
         # A small local model can occasionally copy an adult/child sleep range to the
         # wrong age. Reject that contradiction instead of showing unsafe information.
         age_match = re.search(r"\b(?:age[sd]?\s*)?(\d{1,2})(?:-year-old|\s*years?\s*old)?\b", question.lower())
